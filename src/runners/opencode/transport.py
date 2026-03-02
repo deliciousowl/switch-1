@@ -138,6 +138,10 @@ class OpenCodeTransport:
         if isinstance(response, dict):
             processor.process_message_response(response, state)
             state.saw_result = True
+            if not state.saw_error and not state.text:
+                polled = await self._client.poll_assistant_text(session, session_id)
+                if polled and isinstance(polled, str):
+                    state.text = polled
             return processor.make_result(state)
 
         if not state.saw_result and not state.saw_error:

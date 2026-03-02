@@ -1270,14 +1270,21 @@ class SessionRuntime:
         *,
         engine: str,
     ) -> None:
+        final_text = response_parts[-1] if response_parts else ""
+
+        if not final_text and isinstance(stats, dict):
+            maybe_text = stats.get("text")
+            if isinstance(maybe_text, str):
+                final_text = maybe_text
+
         parts: list[str] = []
         if tool_summaries:
             tools = " ".join(tool_summaries[:5])
             if len(tool_summaries) > 5:
                 tools += f" +{len(tool_summaries) - 5}"
             parts.append(tools)
-        if response_parts:
-            parts.append(response_parts[-1])
+        if final_text:
+            parts.append(final_text)
 
         meta_type = None
         meta_attrs: dict[str, str] | None = None
@@ -1361,7 +1368,7 @@ class SessionRuntime:
         await self._messages.add(
             self.session_name,
             "assistant",
-            response_parts[-1] if response_parts else "",
+            final_text,
             engine,
         )
 
