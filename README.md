@@ -133,6 +133,7 @@ Switch between engines mid-session with `/agent cc` or `/agent pi`.
 
 - **Multi-session**: each conversation = separate XMPP contact
 - **Multi-engine**: Claude, Pi (any model), Debate — switchable per session
+- **Voice calls**: call any session or dispatcher from Conversations — speech is transcribed via faster-whisper and processed as messages. Say "cancel" or "stop" mid-call to interrupt the bot.
 - **Collaborative rooms**: invite participants into shared MUC sessions
 - **Debate approval gate**: debate plans pause for review before execution — reply "go" or send modifications
 - **Cross-session context**: `/context from:<session>` loads history from another session into the current one
@@ -152,6 +153,30 @@ cp .env.example .env                 # configure
 ln -sf ~/switch/AGENTS.md ~/CLAUDE.md  # agent instructions symlink
 uv run python -m src.bridge          # run
 ```
+
+### Voice calls (optional)
+
+Enable voice call support by setting in `.env`:
+
+```bash
+SWITCH_VOICE_ENABLED=1
+
+# ICE servers — set to "none" for direct routing (e.g. Tailscale)
+SWITCH_STUN_SERVER=none
+SWITCH_TURN_SERVER=none
+
+# Or configure real STUN/TURN for calls across NAT:
+# SWITCH_STUN_SERVER=stun:stun.l.google.com:19302
+# SWITCH_TURN_SERVER=turn:your-server:3478
+# SWITCH_TURN_USER=user
+# SWITCH_TURN_PASS=pass
+
+# Whisper model (default: base)
+# SWITCH_WHISPER_MODEL=base
+# SWITCH_WHISPER_DEVICE=auto
+```
+
+Requires `aiortc`, `faster-whisper`, `webrtcvad`, and `av` (included in deps). Call any session or dispatcher contact from Conversations (Android) — the bot picks up, transcribes your speech, and processes it. Voice commands during calls: say "cancel"/"stop" to interrupt, "retry" to re-run, "recap" for summary.
 
 Or as a systemd user service:
 
