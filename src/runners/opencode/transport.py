@@ -169,6 +169,10 @@ class OpenCodeTransport:
                 await sse_task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                # Never fail the whole run because SSE teardown surfaced an
+                # exception (we can still return POST/poll results).
+                log.debug("OpenCode SSE task ended during cleanup: %s", e)
 
         if message_task:
             if not message_task.done():
