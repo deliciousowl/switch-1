@@ -49,10 +49,12 @@ class Session:
     xmpp_jid: str
     xmpp_password: str
     claude_session_id: str | None
+    opencode_session_id: str | None
     pi_session_id: str | None
     active_engine: str
-    model_id: str
+    model_id: str | None
     reasoning_mode: str
+    opencode_agent: str | None
     dispatcher_jid: str | None
     owner_jid: str | None
     room_jid: str | None
@@ -91,6 +93,25 @@ class SessionMessage:
     created_at: str
 
 
+@dataclass
+class DelegationTask:
+    """Delegation task record."""
+
+    id: int
+    token: str
+    parent_session: str
+    dispatcher_name: str
+    dispatcher_jid: str
+    prompt: str
+    status: str
+    delegated_session: str | None
+    delegated_user_message_id: int | None
+    delegated_reply_message_id: int | None
+    error: str | None
+    created_at: str
+    updated_at: str
+
+
 class SessionRepository:
     """Repository for sessions table."""
 
@@ -104,10 +125,14 @@ class SessionRepository:
             xmpp_jid=row["xmpp_jid"],
             xmpp_password=row["xmpp_password"],
             claude_session_id=row["claude_session_id"],
+            opencode_session_id=row["opencode_session_id"]
+            if "opencode_session_id" in row.keys()
+            else None,
             pi_session_id=row["pi_session_id"] if "pi_session_id" in row.keys() else None,
             active_engine=row["active_engine"] or "pi",
             model_id=row["model_id"] or None,
             reasoning_mode=row["reasoning_mode"] or "normal",
+            opencode_agent=row["opencode_agent"] if "opencode_agent" in row.keys() else None,
             dispatcher_jid=row["dispatcher_jid"]
             if "dispatcher_jid" in row.keys()
             else None,
@@ -313,6 +338,14 @@ class SessionRepository:
             )
             self.conn.commit()
 
+    async def update_opencode_session_id(self, name: str, session_id: str) -> None:
+        async with self._write_lock:
+            self.conn.execute(
+                "UPDATE sessions SET opencode_session_id = ? WHERE name = ?",
+                (session_id, name),
+            )
+            self.conn.commit()
+
     async def update_pi_session_id(self, name: str, session_id: str) -> None:
         async with self._write_lock:
             self.conn.execute(
@@ -325,6 +358,14 @@ class SessionRepository:
         async with self._write_lock:
             self.conn.execute(
                 "UPDATE sessions SET claude_session_id = NULL WHERE name = ?",
+                (name,),
+            )
+            self.conn.commit()
+
+    async def reset_opencode_session(self, name: str) -> None:
+        async with self._write_lock:
+            self.conn.execute(
+                "UPDATE sessions SET opencode_session_id = NULL WHERE name = ?",
                 (name,),
             )
             self.conn.commit()
@@ -524,6 +565,103 @@ class MessageRepository:
         return [self._row_to_message(row) for row in rows]
 
 
+class DelegationTaskRepository:
+    """Repository for delegation_tasks table."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+
+    def _row_to_task(self, row: sqlite3.Row) -> DelegationTask:
+        return DelegationTask(
+            id=row["id"],
+            token=row["token"],
+            parent_session=row["parent_session"],
+            dispatcher_name=row["dispatcher_name"],
+            dispatcher_jid=row["dispatcher_jid"],
+            prompt=row["prompt"],
+            status=row["status"],
+            delegated_session=row["delegated_session"],
+            delegated_user_message_id=row["delegated_user_message_id"],
+            delegated_reply_message_id=row["delegated_reply_message_id"],
+            error=row["error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    def create(
+        self,
+        *,
+        token: str,
+        parent_session: str,
+        dispatcher_name: str,
+        dispatcher_jid: str,
+        prompt: str,
+    ) -> int:
+        now = datetime.now().isoformat()
+        cursor = self.conn.execute(
+            """INSERT INTO delegation_tasks
+               (token, parent_session, dispatcher_name, dispatcher_jid, prompt, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, 'queued', ?, ?)""",
+            (token, parent_session, dispatcher_name, dispatcher_jid, prompt, now, now),
+        )
+        self.conn.commit()
+        if cursor.lastrowid is None:
+            raise RuntimeError("Failed to create delegation task")
+        return int(cursor.lastrowid)
+
+    def mark_running(self, token: str) -> None:
+        self.conn.execute(
+            """UPDATE delegation_tasks
+               SET status = 'running', updated_at = ?
+               WHERE token = ?""",
+            (datetime.now().isoformat(), token),
+        )
+        self.conn.commit()
+
+    def mark_spawned(
+        self,
+        token: str,
+        *,
+        delegated_session: str,
+        delegated_user_message_id: int,
+    ) -> None:
+        self.conn.execute(
+            """UPDATE delegation_tasks
+               SET status = 'spawned',
+                   delegated_session = ?,
+                   delegated_user_message_id = ?,
+                   updated_at = ?
+               WHERE token = ?""",
+            (
+                delegated_session,
+                delegated_user_message_id,
+                datetime.now().isoformat(),
+                token,
+            ),
+        )
+        self.conn.commit()
+
+    def mark_completed(self, token: str, *, delegated_reply_message_id: int) -> None:
+        self.conn.execute(
+            """UPDATE delegation_tasks
+               SET status = 'completed',
+                   delegated_reply_message_id = ?,
+                   updated_at = ?
+               WHERE token = ?""",
+            (delegated_reply_message_id, datetime.now().isoformat(), token),
+        )
+        self.conn.commit()
+
+    def mark_failed(self, token: str, *, error: str, status: str = "failed") -> None:
+        self.conn.execute(
+            """UPDATE delegation_tasks
+               SET status = ?, error = ?, updated_at = ?
+               WHERE token = ?""",
+            (status, error, datetime.now().isoformat(), token),
+        )
+        self.conn.commit()
+
+
 def init_db() -> sqlite3.Connection:
     """Initialize SQLite database with schema and migrations."""
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
@@ -611,6 +749,33 @@ def init_db() -> sqlite3.Connection:
 
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_messages_session_name_id ON session_messages(session_name, id DESC)"
+    )
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS delegation_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            token TEXT UNIQUE NOT NULL,
+            parent_session TEXT NOT NULL,
+            dispatcher_name TEXT NOT NULL,
+            dispatcher_jid TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            delegated_session TEXT,
+            delegated_user_message_id INTEGER,
+            delegated_reply_message_id INTEGER,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (parent_session) REFERENCES sessions(name) ON DELETE CASCADE,
+            FOREIGN KEY (delegated_session) REFERENCES sessions(name) ON DELETE SET NULL
+        )
+    """)
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_delegation_tasks_parent_created ON delegation_tasks(parent_session, created_at DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_delegation_tasks_status_updated ON delegation_tasks(status, updated_at DESC)"
     )
 
     # Migrations for existing databases

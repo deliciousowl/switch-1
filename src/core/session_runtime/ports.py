@@ -12,6 +12,7 @@ from typing import Protocol
 
 from src.runners import Runner, RunnerEvent
 from src.runners.debate.config import DebateConfig
+from src.runners.opencode.config import OpenCodeConfig
 from src.runners.pi.config import PiConfig
 from src.attachments import Attachment
 
@@ -21,8 +22,9 @@ class SessionState:
     name: str
     active_engine: str
     claude_session_id: str | None
+    opencode_session_id: str | None
     pi_session_id: str | None
-    model_id: str
+    model_id: str | None
     reasoning_mode: str
 
 
@@ -32,6 +34,8 @@ class SessionStorePort(Protocol):
     async def update_last_active(self, name: str) -> None: ...
 
     async def update_claude_session_id(self, name: str, session_id: str) -> None: ...
+
+    async def update_opencode_session_id(self, name: str, session_id: str) -> None: ...
 
     async def update_pi_session_id(self, name: str, session_id: str) -> None: ...
 
@@ -50,6 +54,7 @@ class RunnerFactoryPort(Protocol):
         session_name: str,
         pi_config: PiConfig | None = None,
         debate_config: DebateConfig | None = None,
+        opencode_config: OpenCodeConfig | None = None,
     ) -> Runner: ...
 
 

@@ -38,32 +38,30 @@ flowchart LR
             subgraph Orchestrators["Orchestrator Contacts"]
                 direction TB
                 CC["cc@...<br/>(Claude Code)"]
-                PI["oc-gpt@...<br/>(Pi — GPT 5.2)"]
-                DB["debate@...<br/>(Debate)"]
+                OC["oc@...<br/>(OpenCode GLM 4.7 Heretic)"]
+                OCGPT["oc-gpt@...<br/>(OpenCode GPT 5.2)"]
             end
 
             Sessions["Session Bots<br/>(task-name@...)"]
 
-            subgraph Engines["AI Engines"]
+            subgraph Engines["AI CLIs"]
                 direction TB
+                OpenCode["OpenCode CLI"]
                 Claude["Claude CLI"]
-                PiCLI["Pi CLI (RPC)"]
-                Debate["Debate (multi-model)"]
             end
         end
     end
 
     Client <-->|"Tailscale IP"| XMPP
     XMPP <--> CC
-    XMPP <--> PI
-    XMPP <--> DB
+    XMPP <--> OC
+    XMPP <--> OCGPT
     XMPP <--> Sessions
+    Sessions --> OpenCode
     Sessions --> Claude
-    Sessions --> PiCLI
-    Sessions --> Debate
 
     classDef orchestrator fill:#f5f5e8,stroke:#8a7d60,color:#2c2c2c;
-    class CC,PI,DB orchestrator;
+    class CC,OC,OCGPT orchestrator;
 ```
 <!-- /DIAGRAM:system -->
 

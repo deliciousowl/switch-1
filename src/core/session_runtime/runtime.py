@@ -21,6 +21,7 @@ from typing import Awaitable, Callable
 from src.attachments import Attachment
 from src.runners import Question, Runner
 from src.runners.debate.config import DebateConfig
+from src.runners.opencode.config import OpenCodeConfig
 from src.runners.pi.config import PiConfig
 
 from src.core.session_runtime.api import (
@@ -72,6 +73,7 @@ class SessionRuntime:
         prompt: AttachmentPromptPort,
         ralph_loops: RalphLoopStorePort | None = None,
         infer_meta_tool_from_summary: Callable[[str], str | None],
+        startup_prompt_context: Callable[[], str] | None = None,
     ):
         self.session_name = session_name
         self.working_dir = working_dir
@@ -84,6 +86,7 @@ class SessionRuntime:
         self._prompt = prompt
         self._ralph_loops = ralph_loops
         self._infer_meta_tool_from_summary = infer_meta_tool_from_summary
+        self._startup_prompt_context = startup_prompt_context
 
         self._generation = 0
         self._queue: asyncio.Queue[_WorkItem] = asyncio.Queue()
@@ -94,6 +97,7 @@ class SessionRuntime:
 
         self.runner: Runner | None = None
         self._run_task: asyncio.Task | None = None
+        self._startup_prompt_context_injected = False
 
         self._pending_question_answers: dict[str, asyncio.Future] = {}
 
@@ -114,12 +118,23 @@ class SessionRuntime:
 
         # Per-engine cumulative usage for the lifetime of this Switch session.
         # This reflects total tokens/cost used, regardless of remote session resets.
-        self._usage_tokens_total: dict[str, int] = {"claude": 0, "pi": 0, "debate": 0}
-        self._usage_cost_total: dict[str, float] = {"claude": 0.0, "pi": 0.0, "debate": 0.0}
+        self._usage_tokens_total: dict[str, int] = {
+            "claude": 0,
+            "pi": 0,
+            "debate": 0,
+            "opencode": 0,
+        }
+        self._usage_cost_total: dict[str, float] = {
+            "claude": 0.0,
+            "pi": 0.0,
+            "debate": 0.0,
+            "opencode": 0.0,
+        }
         self._last_remote_session_id: dict[str, str | None] = {
             "claude": None,
             "pi": None,
             "debate": None,
+            "opencode": None,
         }
 
         # Throttle last_active writes. SQLite commits can become a bottleneck under
@@ -238,6 +253,11 @@ class SessionRuntime:
         if engine == "claude":
             t = stats.get("tokens_total")
             return int(t) if isinstance(t, (int, float)) else 0
+
+        if engine == "opencode":
+            t = stats.get("tokens_total")
+            if isinstance(t, (int, float)):
+                return int(t)
 
         # Pi emits several categories; treat them as additive.
         total = 0
@@ -606,15 +626,24 @@ class SessionRuntime:
 
         # Prepend any stored context (from /context command) to the prompt.
         # Don't apply to debate awaiting states — those operate on raw user input.
-        prompt_for_engine = body_for_history
+        run_prompt = body_for_history
         if self._context_prefix and not (
             engine == "debate" and self._debate_state is not None
         ):
-            prompt_for_engine = self._context_prefix + "\n\n" + body_for_history
+            run_prompt = self._context_prefix + "\n\n" + body_for_history
             self._context_prefix = None
 
+        if not self._startup_prompt_context_injected and self._startup_prompt_context:
+            try:
+                startup = (self._startup_prompt_context() or "").strip()
+            except Exception:
+                startup = ""
+            if startup:
+                run_prompt = f"{startup}\n\n{run_prompt}"
+                self._startup_prompt_context_injected = True
+
         self._run_task = asyncio.create_task(
-            self._run_engine(engine=engine, session=session, prompt=prompt_for_engine)
+            self._run_engine(engine=engine, session=session, prompt=run_prompt)
         )
         try:
             await self._run_task
@@ -873,7 +902,7 @@ class SessionRuntime:
         engine = (
             (cfg.force_engine or session.active_engine or "pi").strip().lower()
         )
-        if engine not in {"claude", "pi"}:
+        if engine not in {"claude", "pi", "opencode"}:
             log.warning("Ralph: engine %r not supported, falling back to pi", engine)
             engine = "pi"
 
@@ -952,6 +981,18 @@ class SessionRuntime:
                 output_dir=self.output_dir,
                 session_name=self.session_name,
             )
+        elif engine == "opencode":
+            self.runner = self._runner_factory.create(
+                "opencode",
+                working_dir=self.working_dir,
+                output_dir=self.output_dir,
+                session_name=self.session_name,
+                opencode_config=OpenCodeConfig(
+                    model=session.model_id or None,
+                    reasoning_mode=session.reasoning_mode,
+                    question_callback=self._create_question_callback(engine="opencode"),
+                ),
+            )
         elif engine == "pi":
             self.runner = self._runner_factory.create(
                 "pi",
@@ -975,6 +1016,8 @@ class SessionRuntime:
     def _session_id_for_engine(engine: str, session: SessionState) -> str | None:
         if engine == "claude":
             return session.claude_session_id
+        if engine == "opencode":
+            return session.opencode_session_id
         if engine == "pi":
             return session.pi_session_id
         return None
@@ -982,6 +1025,8 @@ class SessionRuntime:
     async def _save_session_id(self, engine: str, session_id: str) -> None:
         if engine == "claude":
             await self._sessions.update_claude_session_id(self.session_name, session_id)
+        elif engine == "opencode":
+            await self._sessions.update_opencode_session_id(self.session_name, session_id)
         elif engine == "pi":
             await self._sessions.update_pi_session_id(self.session_name, session_id)
 
@@ -991,7 +1036,7 @@ class SessionRuntime:
         if engine == "debate":
             await self._run_debate(session, prompt)
             return
-        if engine not in {"claude", "pi"}:
+        if engine not in {"claude", "pi", "opencode"}:
             await self._emit(OutboundMessage(f"Unknown engine '{engine}'."))
             return
         await self._run_engine_generic(engine, session, prompt)
@@ -1006,7 +1051,7 @@ class SessionRuntime:
         result_engine: str | None = None,
         ephemeral: bool = False,
     ) -> None:
-        """Unified event loop for claude and pi engines.
+        """Unified event loop for claude, opencode, and pi engines.
 
         If ephemeral=True, don't save session_id (used by /handoff to avoid
         overwriting the target engine's session state).
