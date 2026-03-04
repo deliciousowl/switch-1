@@ -33,6 +33,13 @@ class DelegationResult:
     content: str
 
 
+@dataclass(frozen=True)
+class IntentRule:
+    pattern: re.Pattern[str]
+    trigger: str
+    requires_target: bool = False
+
+
 _ALIAS_TO_DISPATCHER: dict[str, str] = {
     "codex": "oc-codex",
     "gemini": "oc-gemini",
@@ -50,34 +57,36 @@ _LEADING_FILLERS_RE = re.compile(
     re.IGNORECASE,
 )
 
-_INTENT_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
-    (
-        re.compile(
+_INTENT_RULES: tuple[IntentRule, ...] = (
+    IntentRule(
+        pattern=re.compile(
             r"^(?:please\s+)?(?:can\s+you\s+)?(?:ask|query|consult)\s+(?P<target>[a-z0-9_-]+)\s+(?P<prompt>.+)$",
             re.IGNORECASE,
         ),
-        "ask-target",
+        trigger="ask-target",
+        requires_target=True,
     ),
-    (
-        re.compile(
+    IntentRule(
+        pattern=re.compile(
             r"^(?:please\s+)?(?:can\s+you\s+)?delegate(?:\s+(?:this|that|it))?(?:\s+to)?\s+(?P<target>[a-z0-9_-]+)\s*[:,-]?\s*(?P<prompt>.+)$",
             re.IGNORECASE,
         ),
-        "delegate-target",
+        trigger="delegate-target",
+        requires_target=True,
     ),
-    (
-        re.compile(
+    IntentRule(
+        pattern=re.compile(
             r"^(?:please\s+)?(?:can\s+you\s+)?delegate(?:\s+(?:this|that|it))?\s*(?:on|about|for|:)?\s*(?P<prompt>.+)$",
             re.IGNORECASE,
         ),
-        "delegate-generic",
+        trigger="delegate-generic",
     ),
-    (
-        re.compile(
+    IntentRule(
+        pattern=re.compile(
             r"^(?:please\s+)?(?:can\s+you\s+)?get\s+(?:a\s+)?second\s+opinion(?:\s+from\s+(?P<target>[a-z0-9_-]+))?\s*(?:on|about|for|:)?\s*(?P<prompt>.+)$",
             re.IGNORECASE,
         ),
-        "second-opinion",
+        trigger="second-opinion",
     ),
 )
 
@@ -162,8 +171,8 @@ def parse_intent(body: str, *, dispatchers: dict[str, dict]) -> DelegationIntent
 
     normalized = _normalize_intent_text(text)
 
-    for pattern, trigger in _INTENT_RULES:
-        m = pattern.match(normalized)
+    for rule in _INTENT_RULES:
+        m = rule.pattern.match(normalized)
         if not m:
             continue
 
@@ -172,6 +181,8 @@ def parse_intent(body: str, *, dispatchers: dict[str, dict]) -> DelegationIntent
             return None
 
         target_raw = (m.groupdict().get("target") or "").strip()
+        if rule.requires_target and not target_raw:
+            continue
         dispatcher_name = _resolve_dispatcher_with_fallback(target_raw, known)
         if target_raw and not dispatcher_name:
             continue
@@ -181,7 +192,7 @@ def parse_intent(body: str, *, dispatchers: dict[str, dict]) -> DelegationIntent
         return DelegationIntent(
             dispatcher_name=dispatcher_name,
             prompt=prompt,
-            trigger=trigger,
+            trigger=rule.trigger,
         )
 
     return None
