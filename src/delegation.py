@@ -45,6 +45,42 @@ _ALIAS_TO_DISPATCHER: dict[str, str] = {
     "zen": "oc-glm-zen",
 }
 
+_LEADING_FILLERS_RE = re.compile(
+    r"^(?:(?:ok(?:ay)?|alright|all\s+right|hey|yo|well|so|right|hmm|um|uh)[,\s]+)+",
+    re.IGNORECASE,
+)
+
+_INTENT_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"^(?:please\s+)?(?:can\s+you\s+)?(?:ask|query|consult)\s+(?P<target>[a-z0-9_-]+)\s+(?P<prompt>.+)$",
+            re.IGNORECASE,
+        ),
+        "ask-target",
+    ),
+    (
+        re.compile(
+            r"^(?:please\s+)?(?:can\s+you\s+)?delegate(?:\s+(?:this|that|it))?(?:\s+to)?\s+(?P<target>[a-z0-9_-]+)\s*[:,-]?\s*(?P<prompt>.+)$",
+            re.IGNORECASE,
+        ),
+        "delegate-target",
+    ),
+    (
+        re.compile(
+            r"^(?:please\s+)?(?:can\s+you\s+)?delegate(?:\s+(?:this|that|it))?\s*(?:on|about|for|:)?\s*(?P<prompt>.+)$",
+            re.IGNORECASE,
+        ),
+        "delegate-generic",
+    ),
+    (
+        re.compile(
+            r"^(?:please\s+)?(?:can\s+you\s+)?get\s+(?:a\s+)?second\s+opinion(?:\s+from\s+(?P<target>[a-z0-9_-]+))?\s*(?:on|about|for|:)?\s*(?P<prompt>.+)$",
+            re.IGNORECASE,
+        ),
+        "second-opinion",
+    ),
+)
+
 
 class _DispatchSendBot(BaseXMPPBot):
     def __init__(self, jid: str, password: str, target_jid: str, message: str):
@@ -90,6 +126,31 @@ def resolve_dispatcher_name(raw: str | None, known: set[str]) -> str | None:
     return None
 
 
+def _normalize_intent_text(text: str) -> str:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    return _LEADING_FILLERS_RE.sub("", normalized).strip()
+
+
+def _clean_prompt(raw_prompt: str) -> str:
+    return re.sub(r"^to\s+", "", raw_prompt.strip(), flags=re.IGNORECASE).strip()
+
+
+def _resolve_dispatcher_with_fallback(target_raw: str, known: set[str]) -> str | None:
+    dispatcher_name = resolve_dispatcher_name(target_raw, known)
+    if target_raw and not dispatcher_name:
+        # The user asked for a specific target, but it's not recognized.
+        return None
+    if dispatcher_name:
+        return dispatcher_name
+
+    fallback = _default_delegate_dispatcher()
+    dispatcher_name = resolve_dispatcher_name(fallback, known)
+    if dispatcher_name:
+        return dispatcher_name
+
+    return resolve_dispatcher_name(_default_dispatcher_name(), known)
+
+
 def parse_intent(body: str, *, dispatchers: dict[str, dict]) -> DelegationIntent | None:
     text = (body or "").strip()
     if not text:
@@ -99,65 +160,21 @@ def parse_intent(body: str, *, dispatchers: dict[str, dict]) -> DelegationIntent
     if not known:
         return None
 
-    normalized = re.sub(r"\s+", " ", text).strip()
-    normalized = re.sub(
-        r"^(?:(?:ok(?:ay)?|alright|all\s+right|hey|yo|well|so|right|hmm|um|uh)[,\s]+)+",
-        "",
-        normalized,
-        flags=re.IGNORECASE,
-    ).strip()
+    normalized = _normalize_intent_text(text)
 
-    rules: list[tuple[re.Pattern[str], str]] = [
-        (
-            re.compile(
-                r"^(?:please\s+)?(?:can\s+you\s+)?(?:ask|query|consult)\s+(?P<target>[a-z0-9_-]+)\s+(?P<prompt>.+)$",
-                re.IGNORECASE,
-            ),
-            "ask-target",
-        ),
-        (
-            re.compile(
-                r"^(?:please\s+)?(?:can\s+you\s+)?delegate(?:\s+(?:this|that|it))?(?:\s+to)?\s+(?P<target>[a-z0-9_-]+)\s*[:,-]?\s*(?P<prompt>.+)$",
-                re.IGNORECASE,
-            ),
-            "delegate-target",
-        ),
-        (
-            re.compile(
-                r"^(?:please\s+)?(?:can\s+you\s+)?delegate(?:\s+(?:this|that|it))?\s*(?:on|about|for|:)?\s*(?P<prompt>.+)$",
-                re.IGNORECASE,
-            ),
-            "delegate-generic",
-        ),
-        (
-            re.compile(
-                r"^(?:please\s+)?(?:can\s+you\s+)?get\s+(?:a\s+)?second\s+opinion(?:\s+from\s+(?P<target>[a-z0-9_-]+))?\s*(?:on|about|for|:)?\s*(?P<prompt>.+)$",
-                re.IGNORECASE,
-            ),
-            "second-opinion",
-        ),
-    ]
-
-    for pattern, trigger in rules:
+    for pattern, trigger in _INTENT_RULES:
         m = pattern.match(normalized)
         if not m:
             continue
 
-        prompt = (m.groupdict().get("prompt") or "").strip()
-        prompt = re.sub(r"^to\s+", "", prompt, flags=re.IGNORECASE).strip()
+        prompt = _clean_prompt(m.groupdict().get("prompt") or "")
         if not prompt:
             return None
 
         target_raw = (m.groupdict().get("target") or "").strip()
-        dispatcher_name = resolve_dispatcher_name(target_raw, known)
+        dispatcher_name = _resolve_dispatcher_with_fallback(target_raw, known)
         if target_raw and not dispatcher_name:
-            # The user asked for a specific target, but it's not recognized.
             continue
-        if not dispatcher_name:
-            fallback = _default_delegate_dispatcher()
-            dispatcher_name = resolve_dispatcher_name(fallback, known)
-        if not dispatcher_name:
-            dispatcher_name = resolve_dispatcher_name(_default_dispatcher_name(), known)
         if not dispatcher_name:
             return None
 
@@ -294,6 +311,7 @@ async def delegate_once(
         )
 
     deadline = time.monotonic() + max(5.0, float(timeout_s or 0.0))
+    poll_interval = max(0.1, float(poll_interval_s or 1.0))
     session_name: str | None = None
     user_message_id: int | None = None
 
@@ -307,13 +325,13 @@ async def delegate_once(
         )
         if session_ref:
             session_name, user_message_id = session_ref
-            if on_spawned:
+            if on_spawned is not None:
                 try:
                     on_spawned(session_name, user_message_id)
                 except Exception:
                     pass
             break
-        await asyncio.sleep(max(0.1, float(poll_interval_s or 1.0)))
+        await asyncio.sleep(poll_interval)
 
     if not session_name or user_message_id is None:
         raise TimeoutError("timed out waiting for delegated session creation")
@@ -332,6 +350,6 @@ async def delegate_once(
                 assistant_message_id=reply_id,
                 content=content.strip(),
             )
-        await asyncio.sleep(max(0.1, float(poll_interval_s or 1.0)))
+        await asyncio.sleep(poll_interval)
 
     raise TimeoutError(f"timed out waiting for delegated answer from {session_name}")
