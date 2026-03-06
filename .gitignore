@@ -1,4 +1,5 @@
 .env
+dispatchers.local.json
 .claude/
 .opencode/node_modules/
 .opencode/package.json

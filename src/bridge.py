@@ -15,6 +15,7 @@ Reply directly to that contact to continue the conversation.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
 import os
 import signal
@@ -51,7 +52,48 @@ logging.basicConfig(
 log = logging.getLogger("bridge")
 
 
+class _SingleInstanceLock:
+    def __init__(self, path: Path):
+        self._path = path
+        self._fh = None
+
+    def acquire(self) -> bool:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = self._path.open("w")
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        self._fh.write(str(os.getpid()))
+        self._fh.flush()
+        return True
+
+    def release(self) -> None:
+        if not self._fh:
+            return
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            self._fh.close()
+        except OSError:
+            pass
+        self._fh = None
+
+
 async def main():
+    lock_path = Path(
+        os.getenv("SWITCH_LOCK_FILE", "/tmp/switch-bridge.lock")
+    ).expanduser()
+    lock = _SingleInstanceLock(lock_path)
+    if not lock.acquire():
+        log.error(
+            "Another Switch bridge instance is already running (lock: %s). Exiting.",
+            lock_path,
+        )
+        return
+
     db = init_db()
 
     try:
@@ -126,6 +168,7 @@ async def main():
         log.info("Signal received, shutting down gracefully...")
         await manager.shutdown()
     finally:
+        lock.release()
         log.info("Closing database connection")
         try:
             db.execute("PRAGMA wal_checkpoint(TRUNCATE)")

@@ -23,7 +23,7 @@ Use `--list-dispatchers` to see available engines, `--dispatcher <name>` to pick
 ### Ask Another Agent (Second Opinion)
 
 ```bash
-cd ~/switch && PYTHONPATH=. ~/switch/.venv/bin/python scripts/ask-agent.py --dispatcher oc-codex "question"
+cd ~/switch && PYTHONPATH=. ~/switch/.venv/bin/python scripts/ask-agent.py --dispatcher oc-gpt "question"
 ```
 
 Use this proactively when you want a second opinion, need model-specific strengths, or want to compare approaches.

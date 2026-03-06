@@ -84,6 +84,41 @@ class CommandHandler:
 
         return False
 
+    @command("/dispatchers", "/delegates")
+    async def dispatchers(self, _body: str) -> bool:
+        """List configured dispatchers available for delegation."""
+        manager = self.bot.manager
+        if not manager:
+            self.bot.send_reply("No session manager attached; cannot list dispatchers.")
+            return True
+
+        cfg = manager.dispatchers_config or {}
+        if not cfg:
+            self.bot.send_reply("No dispatchers configured.")
+            return True
+
+        lines: list[str] = ["Available dispatchers:"]
+        for name in sorted(cfg.keys()):
+            raw = cfg.get(name) or {}
+            if not isinstance(raw, dict):
+                continue
+            if raw.get("disabled") is True:
+                continue
+            jid = str(raw.get("jid") or "").strip()
+            has_password = bool(str(raw.get("password") or "").strip())
+            if not jid:
+                continue
+            suffix = "" if has_password else " (missing password)"
+            lines.append(f"- {name} ({jid}){suffix}")
+
+        if len(lines) == 1:
+            self.bot.send_reply("No active dispatchers configured.")
+            return True
+
+        lines.append("Example: ask oc-gemini What do you think about this plan?")
+        self.bot.send_reply("\n".join(lines))
+        return True
+
     @command("/kill")
     async def kill(self, _body: str) -> bool:
         """Hard-kill the session (cancel work, close account, stop reconnect)."""
@@ -95,7 +130,7 @@ class CommandHandler:
     @command("/cancel")
     async def cancel(self, _body: str) -> bool:
         """Cancel current operation."""
-        cancelled = self.bot.cancel_operations(notify=False)
+        cancelled = self.bot.cancel_operations(notify=False, hard_abort_vllm=True)
         if cancelled:
             self.bot.send_reply("Cancelling current work...")
         else:
@@ -146,8 +181,8 @@ class CommandHandler:
             return True
 
         engine = (session.active_engine or "").strip().lower()
-        if engine != "pi":
-            self.bot.send_reply("/thinking only applies to Pi sessions.")
+        if engine not in {"pi", "opencode"}:
+            self.bot.send_reply("/thinking only applies to Pi/OpenCode sessions.")
             return True
 
         await self.bot.sessions.update_reasoning_mode(self.bot.session_name, parts[1])
@@ -181,8 +216,10 @@ class CommandHandler:
         engine = (session.active_engine or "").strip().lower()
         if engine == "claude":
             await self.bot.sessions.reset_claude_session(self.bot.session_name)
-        elif engine in {"pi", "debate"}:
+        elif engine == "pi":
             await self.bot.sessions.reset_pi_session(self.bot.session_name)
+        elif engine == "opencode":
+            await self.bot.sessions.reset_opencode_session(self.bot.session_name)
         else:
             self.bot.send_reply(f"Unknown engine '{session.active_engine}'.")
             return True
@@ -359,9 +396,6 @@ class CommandHandler:
         if self.bot.processing:
             self.bot.send_reply("Already processing. /cancel first, then /retry.")
             return True
-        if self.bot.session.debate_awaiting():
-            self.bot.send_reply("Debate is waiting for your input. Reply directly or /cancel first.")
-            return True
         messages = self.bot.messages.list_recent(self.bot.session_name, limit=20)
         for msg in messages:
             if msg.role == "user" and msg.content.strip():
@@ -379,9 +413,6 @@ class CommandHandler:
         """Summarize session history."""
         if self.bot.processing:
             self.bot.send_reply("Already processing. Try /recap after current work completes.")
-            return True
-        if self.bot.session.debate_awaiting():
-            self.bot.send_reply("Debate is waiting for your input. Reply directly or /cancel first.")
             return True
         messages = self.bot.messages.list_recent(self.bot.session_name, limit=40)
         if not messages:
@@ -463,12 +494,12 @@ class CommandHandler:
         """Hand off to another engine."""
         parts = body.strip().split(maxsplit=2)
         if len(parts) < 2:
-            self.bot.send_reply("Usage: /handoff <engine> [prompt]\nEngines: pi, claude")
+            self.bot.send_reply("Usage: /handoff <engine> [prompt]\nEngines: pi, claude, opencode")
             return True
 
         engine = normalize_engine(parts[1])
-        if not engine or engine == "debate":
-            self.bot.send_reply("Usage: /handoff <engine> [prompt]\nEngines: pi, claude")
+        if not engine:
+            self.bot.send_reply("Usage: /handoff <engine> [prompt]\nEngines: pi, claude, opencode")
             return True
 
         if self.bot.processing:

@@ -26,8 +26,9 @@ class ClaudeRunner(BaseRunner):
     # thinking, but fall back gracefully if the local CLI doesn't recognize the
     # flag(s).
     _THINKING_ARG_TRIES: tuple[tuple[str, ...], ...] = (
+        ("--thinking", "adaptive"),
+        ("--thinking", "enabled"),
         ("--thinking",),
-        ("--thinking", "high"),
     )
 
     def __init__(
@@ -69,7 +70,7 @@ class ClaudeRunner(BaseRunner):
         """Return thinking flag candidates.
 
         Can be overridden via SWITCH_CLAUDE_THINKING_ARGS. Example:
-            SWITCH_CLAUDE_THINKING_ARGS='--thinking high'
+            SWITCH_CLAUDE_THINKING_ARGS='--thinking adaptive'
         """
         raw = os.getenv("SWITCH_CLAUDE_THINKING_ARGS")
         if raw and raw.strip():
@@ -85,9 +86,14 @@ class ClaudeRunner(BaseRunner):
             "unknown argument",
             "unexpected argument",
             "invalid option",
+            "is invalid",
+            "allowed choices are",
             "unknown flag",
             "no such option",
             "flag provided but not defined",
+            "argument missing",
+            "requires an argument",
+            "missing argument",
         )
         return any(n in haystack for n in needles)
 

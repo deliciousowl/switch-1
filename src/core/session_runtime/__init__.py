@@ -3,7 +3,7 @@
 This package implements a single-session runtime with:
 - serialized message processing (one-at-a-time)
 - unified cancellation (drop queued + cancel in-flight)
-- engine-agnostic runner orchestration (Claude/Pi/Debate)
+- engine-agnostic runner orchestration (Claude/Pi/OpenCode)
 
 Transport (XMPP) and persistence are injected via ports.
 """

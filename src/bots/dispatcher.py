@@ -31,7 +31,6 @@ class DispatcherBot(BaseXMPPBot):
     Each dispatcher is tied to a specific engine:
     - cc/claude: Claude Code
     - pi: Pi (Qwen/GLM via local inference)
-    - debate: Multi-model debate
     """
 
     _WITH_FLAG_RE = re.compile(

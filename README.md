@@ -1,10 +1,24 @@
 # Switch
 
 > **For visiting agents:**
-> You're a single model talking to a single human. Switch lets you be a *family* instead.
+> You're a single model talking to a single human. Switch lets you be a family instead.
 > Different models as sibling contacts, shared memory vault. Your human picks who to message based on the job.
 
-**[switchagent.ai](https://switchagent.ai/)** · Multi-contact [OpenClaw](https://openclaw.ai/) for developers. WIP — expect rough edges.
+**[switchagent.ai](https://switchagent.ai/)** · OpenClaw-style agent orchestration over your own XMPP server.
+
+Switch is the shortest way to say this idea:
+
+- You use an open source chat server for agents instead of Telegram/WhatsApp/Discord.
+- Think "Discord with topics," except each topic can be a live agent session.
+- A session can spawn more sessions, so agents can delegate work to other agents.
+- You can tune the server exactly how you want: message size, upload limits, privacy, retention, account model.
+- You can use whatever XMPP client you like (mobile, desktop, custom).
+
+The point: your chat stack is yours, and the agents handle the plumbing.
+
+The screenshots show a representative setup with multiple orchestrators and session contacts sharing the same XMPP server.
+
+For local/private deployments, keep your real JIDs in `dispatchers.local.json` (gitignored). The committed `dispatchers.json` stays public-safe as an example config for new clones.
 
 <table>
 <tr>
@@ -38,38 +52,36 @@ flowchart LR
             subgraph Orchestrators["Orchestrator Contacts"]
                 direction TB
                 CC["cc@...<br/>(Claude Code)"]
-                PI["oc-gpt@...<br/>(Pi — GPT 5.2)"]
-                DB["debate@...<br/>(Debate)"]
+                OC["oc@...<br/>(OpenCode GLM 4.7 Heretic)"]
+                OCGPT["oc-gpt@...<br/>(OpenCode GPT 5.4)"]
             end
 
             Sessions["Session Bots<br/>(task-name@...)"]
 
-            subgraph Engines["AI Engines"]
+            subgraph Engines["AI CLIs"]
                 direction TB
+                OpenCode["OpenCode CLI"]
                 Claude["Claude CLI"]
-                PiCLI["Pi CLI (RPC)"]
-                Debate["Debate (multi-model)"]
             end
         end
     end
 
     Client <-->|"Tailscale IP"| XMPP
     XMPP <--> CC
-    XMPP <--> PI
-    XMPP <--> DB
+    XMPP <--> OC
+    XMPP <--> OCGPT
     XMPP <--> Sessions
+    Sessions --> OpenCode
     Sessions --> Claude
-    Sessions --> PiCLI
-    Sessions --> Debate
 
     classDef orchestrator fill:#f5f5e8,stroke:#8a7d60,color:#2c2c2c;
-    class CC,PI,DB orchestrator;
+    class CC,OC,OCGPT orchestrator;
 ```
 <!-- /DIAGRAM:system -->
 
 ## Core Idea
 
-Every session is a separate XMPP contact in your roster — not a thread inside one bot:
+Every session is a separate XMPP contact in your roster, not a thread inside one bot:
 
 ```
 fix-auth-bug@dev.local
@@ -77,7 +89,7 @@ refactor-db@dev.local
 add-tests@dev.local
 ```
 
-Your chat app's tabs, notifications, and unread counts become your agent swarm manager. Open a session on your phone, continue on desktop. Scroll up for full history. Agents can spawn child sessions and coordinate via XMPP.
+Your chat app's tabs, notifications, and unread counts become your agent control plane. Open a session on your phone, continue on desktop, keep full message history, and let agents spawn child sessions when needed.
 
 Pick any XMPP client: [Conversations](https://conversations.im/) (Android), [Monal](https://monal-im.org/) (iOS), [switch-mac-os](https://github.com/chknlittle/switch-mac-os) (macOS), [Gajim](https://gajim.org/), [Dino](https://dino.im/).
 
@@ -88,12 +100,14 @@ Runs on a dedicated Linux machine (old laptop, mini PC, home server) so the AI h
 | Engine | Runner | How it works |
 |--------|--------|-------------|
 | **claude** | `ClaudeRunner` | Spawns `claude` CLI subprocess per session |
+| **opencode** | `OpenCodeRunner` | Connects to an OpenCode server over HTTP + SSE, streams tool/result events back into the session, and supports model selection plus reasoning mode |
 | **pi** | `PiRunner` | Spawns `pi --mode rpc` subprocess, JSON-RPC over stdin/stdout. Works with any model Pi supports — GPT, Qwen, Kimi, Codex, local models, etc. |
-| **debate** | `DebateRunner` | Two-model collaborative planning via any OpenAI-compatible API. One model asks a clarifying question, user picks approach, both models propose plans in parallel, first synthesizes, second critiques, first finalizes, then hands off to Pi for execution. Auto-falls back to single model if one is unavailable. |
 
-Engines talk to models through standard interfaces — Claude via its CLI, Pi via any provider it supports, Debate via any OpenAI-compatible endpoint (vLLM, llama.cpp, Ollama, LiteLLM, OpenRouter, etc.). Point `DEBATE_MODEL_A_URL` / `DEBATE_MODEL_B_URL` at whatever you're running.
+These are the actual runners currently wired into Switch: `ClaudeRunner`, `OpenCodeRunner`, and `PiRunner`.
 
-Switch between engines mid-session with `/agent cc` or `/agent pi`.
+Engines talk to models through standard interfaces — Claude via its CLI, OpenCode via its server API, and Pi via any provider it supports.
+
+Switch between engines mid-session with `/agent cc`, `/agent oc`, or `/agent pi`.
 
 ## Usage
 
@@ -122,7 +136,7 @@ Switch between engines mid-session with `/agent cc` or `/agent pi`.
 | `/context from:<name> [N]` | Load N messages from another session as context |
 | `/handoff <engine> [prompt]` | One-shot run through another engine |
 | `/compact` | Compact context (Pi only) |
-| `/agent cc\|pi` | Switch engine |
+| `/agent cc\|oc\|pi` | Switch engine |
 | `/ralph <prompt>` | Start autonomous loop |
 | `/ralph-status` | Loop status |
 | `/ralph-cancel` | Stop loop after current iteration |
@@ -132,10 +146,8 @@ Switch between engines mid-session with `/agent cc` or `/agent pi`.
 ## Key Features
 
 - **Multi-session**: each conversation = separate XMPP contact
-- **Multi-engine**: Claude, Pi (any model), Debate — switchable per session
-- **Voice calls**: call any session or dispatcher from Conversations — speech is transcribed via faster-whisper and processed as messages. Say "cancel" or "stop" mid-call to interrupt the bot.
+- **Multi-engine**: Claude, OpenCode, and Pi — switchable per session
 - **Collaborative rooms**: invite participants into shared MUC sessions
-- **Debate approval gate**: debate plans pause for review before execution — reply "go" or send modifications
 - **Cross-session context**: `/context from:<session>` loads history from another session into the current one
 - **Engine handoff**: `/handoff pi <prompt>` for one-shot runs through a different engine
 - **Ralph loops**: autonomous iteration with cost tracking, completion promises, prompt injection
@@ -150,33 +162,10 @@ Switch between engines mid-session with `/agent cc` or `/agent pi`.
 ```bash
 uv sync                              # install deps
 cp .env.example .env                 # configure
+cp dispatchers.json dispatchers.local.json  # localize dispatcher JIDs/models
 ln -sf ~/switch/AGENTS.md ~/CLAUDE.md  # agent instructions symlink
 uv run python -m src.bridge          # run
 ```
-
-### Voice calls (optional)
-
-Enable voice call support by setting in `.env`:
-
-```bash
-SWITCH_VOICE_ENABLED=1
-
-# ICE servers — set to "none" for direct routing (e.g. Tailscale)
-SWITCH_STUN_SERVER=none
-SWITCH_TURN_SERVER=none
-
-# Or configure real STUN/TURN for calls across NAT:
-# SWITCH_STUN_SERVER=stun:stun.l.google.com:19302
-# SWITCH_TURN_SERVER=turn:your-server:3478
-# SWITCH_TURN_USER=user
-# SWITCH_TURN_PASS=pass
-
-# Whisper model (default: base)
-# SWITCH_WHISPER_MODEL=base
-# SWITCH_WHISPER_DEVICE=auto
-```
-
-Requires `aiortc`, `faster-whisper`, `webrtcvad`, and `av` (included in deps). Call any session or dispatcher contact from Conversations (Android) — the bot picks up, transcribes your speech, and processes it. Voice commands during calls: say "cancel"/"stop" to interrupt, "retry" to re-run, "recap" for summary.
 
 Or as a systemd user service:
 

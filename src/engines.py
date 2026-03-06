@@ -16,15 +16,16 @@ class EngineSpec:
 
 ENGINE_SPECS = {
     "claude": EngineSpec(name="claude", supports_reasoning=False),
+    "opencode": EngineSpec(name="opencode", supports_reasoning=True),
     "pi": EngineSpec(name="pi", supports_reasoning=True),
-    "debate": EngineSpec(name="debate", supports_reasoning=False),
 }
 
 ENGINE_ALIASES = {
     "cc": "claude",
     "claude": "claude",
+    "oc": "opencode",
+    "opencode": "opencode",
     "pi": "pi",
-    "debate": "debate",
 }
 
 
