@@ -48,7 +48,6 @@ from src.helpers import (
     log_activity,
 )
 from src.runners import Runner, create_runner
-from src.runners.debate.config import DebateConfig
 from src.runners.opencode.config import OpenCodeConfig
 from src.runners.pi.config import PiConfig
 from src.attachments import Attachment, AttachmentStore
@@ -210,7 +209,6 @@ class SessionBot(BaseXMPPBot):
             output_dir: Path,
             session_name: str,
             pi_config: PiConfig | None = None,
-            debate_config: DebateConfig | None = None,
             opencode_config: OpenCodeConfig | None = None,
         ) -> Runner:
             return create_runner(
@@ -219,7 +217,6 @@ class SessionBot(BaseXMPPBot):
                 output_dir=output_dir,
                 session_name=session_name,
                 pi_config=pi_config,
-                debate_config=debate_config,
                 opencode_config=opencode_config,
             )
 
@@ -582,7 +579,7 @@ class SessionBot(BaseXMPPBot):
         if not session:
             return
         engine = (session.active_engine or "").strip().lower()
-        if engine not in {"pi", "debate"}:
+        if engine != "pi":
             return
         model_id = (session.model_id or "").strip()
         if not model_id.startswith("glm_vllm/"):

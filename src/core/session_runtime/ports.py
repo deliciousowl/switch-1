@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Protocol
 
 from src.runners import Runner, RunnerEvent
-from src.runners.debate.config import DebateConfig
 from src.runners.opencode.config import OpenCodeConfig
 from src.runners.pi.config import PiConfig
 from src.attachments import Attachment
@@ -53,7 +52,6 @@ class RunnerFactoryPort(Protocol):
         output_dir: Path,
         session_name: str,
         pi_config: PiConfig | None = None,
-        debate_config: DebateConfig | None = None,
         opencode_config: OpenCodeConfig | None = None,
     ) -> Runner: ...
 

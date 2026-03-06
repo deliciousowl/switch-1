@@ -148,7 +148,7 @@ Think of Switch as 3 big blocks:
 
 1) XMPP adapter: `SessionBot` (parsing + typing + XMPP send)
 2) Session core: `SessionRuntime` (queue + cancel + run + Ralph)
-3) Runners: local (Claude) and remote (OpenCode)
+3) Runners: Claude (`ClaudeRunner`), OpenCode (`OpenCodeRunner`), and Pi (`PiRunner`)
 
 The core never talks XMPP directly; it emits outbound events to an EventSink
 implemented by the XMPP adapter.
@@ -177,7 +177,7 @@ One bot per conversation. Each session:
 
 - Has its own XMPP account (created dynamically via ejabberdctl)
 - Maintains conversation context with the AI backend
-- Can switch between OpenCode and Claude engines
+- Can switch between OpenCode, Claude, and Pi engines
 - Tracks costs, tokens, and tool usage
 
 ### Session Manager
@@ -237,6 +237,13 @@ sessions (
 - Parses streaming JSON events
 - Uses Opus model
 - Supports session resumption
+
+### Pi
+
+- Runs `pi --mode rpc`
+- Communicates over JSON-RPC on stdin/stdout
+- Supports provider-backed model selection via `model_id`
+- Supports session resumption via `pi_session_id`
 
 ## Ralph Loop
 

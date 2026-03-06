@@ -21,7 +21,6 @@ from typing import Awaitable, Callable, cast
 
 from src.attachments import Attachment
 from src.runners import Question, Runner
-from src.runners.debate.config import DebateConfig
 from src.runners.opencode.config import OpenCodeConfig
 from src.runners.pi.config import PiConfig
 
@@ -113,28 +112,21 @@ class SessionRuntime:
         # Context prefix: prepended to the next real user prompt, then cleared.
         self._context_prefix: str | None = None
 
-        # Debate question-phase state machine.
-        # When set, the debate is waiting for the user's answer before running.
-        self._debate_state: dict | None = None
-
         # Per-engine cumulative usage for the lifetime of this Switch session.
         # This reflects total tokens/cost used, regardless of remote session resets.
         self._usage_tokens_total: dict[str, int] = {
             "claude": 0,
             "pi": 0,
-            "debate": 0,
             "opencode": 0,
         }
         self._usage_cost_total: dict[str, float] = {
             "claude": 0.0,
             "pi": 0.0,
-            "debate": 0.0,
             "opencode": 0.0,
         }
         self._last_remote_session_id: dict[str, str | None] = {
             "claude": None,
             "pi": None,
-            "debate": None,
             "opencode": None,
         }
 
@@ -344,10 +336,6 @@ class SessionRuntime:
         """Store context to prepend to the next real user prompt."""
         self._context_prefix = text
 
-    def debate_awaiting(self) -> bool:
-        """True if the debate state machine is waiting for user input."""
-        return self._debate_state is not None
-
     async def run_handoff(self, target_engine: str, prompt: str) -> None:
         """Run a prompt through a specific engine without changing the session's active engine.
 
@@ -415,11 +403,6 @@ class SessionRuntime:
 
         # Clear context prefix on cancel.
         self._context_prefix = None
-
-        # Clear debate question-phase state on cancel.
-        if self._debate_state is not None:
-            self._debate_state = None
-            cancelled_any = True
 
         # Best-effort: unblock any waiting question futures.
         for fut in list(self._pending_question_answers.values()):
@@ -643,11 +626,8 @@ class SessionRuntime:
         engine = (session.active_engine or "pi").strip().lower()
 
         # Prepend any stored context (from /context command) to the prompt.
-        # Don't apply to debate awaiting states — those operate on raw user input.
         run_prompt = body_for_history
-        if self._context_prefix and not (
-            engine == "debate" and self._debate_state is not None
-        ):
+        if self._context_prefix:
             run_prompt = self._context_prefix + "\n\n" + body_for_history
             self._context_prefix = None
 
@@ -998,7 +978,6 @@ class SessionRuntime:
         session: SessionState,
         *,
         pi_config: PiConfig | None = None,
-        debate_config: DebateConfig | None = None,
     ) -> None:
         """Set self.runner for the given engine."""
         if engine == "claude":
@@ -1028,14 +1007,6 @@ class SessionRuntime:
                 session_name=self.session_name,
                 pi_config=pi_config or PiConfig(model=session.model_id or None),
             )
-        elif engine == "debate":
-            self.runner = self._runner_factory.create(
-                "debate",
-                working_dir=self.working_dir,
-                output_dir=self.output_dir,
-                session_name=self.session_name,
-                debate_config=debate_config or DebateConfig(),
-            )
         else:
             raise ValueError(f"Unknown engine: {engine}")
 
@@ -1062,9 +1033,6 @@ class SessionRuntime:
     async def _run_engine(
         self, *, engine: str, session: SessionState, prompt: str
     ) -> None:
-        if engine == "debate":
-            await self._run_debate(session, prompt)
-            return
         if engine not in {"claude", "pi", "opencode"}:
             await self._emit(OutboundMessage(f"Unknown engine '{engine}'."))
             return
@@ -1133,152 +1101,6 @@ class SessionRuntime:
                 await self._emit(OutboundMessage(f"Error: {content}"))
             elif event_type == "cancelled":
                 await self._emit(OutboundMessage("Cancelled."))
-
-    async def _run_debate(self, session: SessionState, prompt: str) -> None:
-        # Phase 3: plan approval — user replied to "Plan ready, reply 'go'"
-        if (
-            self._debate_state is not None
-            and self._debate_state.get("phase") == "awaiting_approval"
-        ):
-            handoff_plan = self._debate_state["handoff_plan"]
-            self._debate_state = None
-
-            user_input = prompt.strip().lower()
-            if user_input in ("go", "yes", "execute", "run", "do it", "proceed"):
-                execute_plan = handoff_plan
-            else:
-                execute_plan = (
-                    f"Additional instructions from user:\n{prompt}\n\n"
-                    f"Original plan:\n{handoff_plan}"
-                )
-
-            debate_cfg = DebateConfig()
-            qwen_model = debate_cfg.resolve_model_a_name()
-            await self._emit(
-                OutboundMessage(
-                    f"---\n\nHanding off to {qwen_model} for implementation..."
-                )
-            )
-            self._create_runner_for_engine(
-                "pi",
-                session,
-                pi_config=PiConfig(model=qwen_model, system_prompt=""),
-            )
-            await self._run_engine_generic(
-                "pi",
-                session,
-                execute_plan,
-                skip_runner_create=True,
-                result_engine="debate",
-            )
-            return
-
-        # Phase 1: generate clarifying question (no debate state yet)
-        if self._debate_state is None:
-            self._create_runner_for_engine("debate", session)
-
-            _buf: list[str] = []
-            _buf_len = 0
-            _FLUSH_THRESHOLD = 200
-
-            async def _flush_q() -> None:
-                nonlocal _buf, _buf_len
-                if _buf:
-                    await self._emit(OutboundMessage("".join(_buf)))
-                    _buf = []
-                    _buf_len = 0
-
-            async for event_type, content in self.runner.generate_question(prompt):
-                if self.shutting_down:
-                    return
-                if event_type == "text" and isinstance(content, str):
-                    _buf.append(content)
-                    _buf_len += len(content)
-                    if _buf_len >= _FLUSH_THRESHOLD:
-                        await _flush_q()
-                elif event_type == "error":
-                    await _flush_q()
-                    await self._emit(OutboundMessage(f"Error: {content}"))
-                    return
-                elif event_type == "cancelled":
-                    await _flush_q()
-                    await self._emit(OutboundMessage("Cancelled."))
-                    return
-
-            await _flush_q()
-
-            # Park: save state and return — user sees the question, session goes idle.
-            self._debate_state = {
-                "phase": "awaiting_answers",
-                "original_prompt": prompt,
-            }
-            return
-
-        # Phase 2: user replied — run the full debate with enriched prompt
-        if self._debate_state.get("phase") == "awaiting_answers":
-            original_prompt = self._debate_state["original_prompt"]
-            self._debate_state = None  # Clear state before running
-
-            enriched_prompt = (
-                original_prompt + "\n\n--- User's approach preference ---\n" + prompt
-            )
-
-            self._create_runner_for_engine("debate", session)
-
-            accumulated = ""
-            handoff_plan: str | None = None
-            _buf2: list[str] = []
-            _buf2_len = 0
-            _FLUSH_THRESHOLD2 = 200
-
-            async def _flush_buf() -> None:
-                nonlocal _buf2, _buf2_len
-                if _buf2:
-                    await self._emit(OutboundMessage("".join(_buf2)))
-                    _buf2 = []
-                    _buf2_len = 0
-
-            async for event_type, content in self.runner.run(enriched_prompt):
-                if self.shutting_down:
-                    return
-                if event_type == "text" and isinstance(content, str):
-                    accumulated += content
-                    _buf2.append(content)
-                    _buf2_len += len(content)
-                    if _buf2_len >= _FLUSH_THRESHOLD2:
-                        await _flush_buf()
-                elif event_type == "result":
-                    await _flush_buf()
-                    await self._send_result(
-                        [],
-                        [accumulated] if accumulated else [],
-                        content,
-                        engine="debate",
-                    )
-                elif event_type == "handoff" and isinstance(content, str):
-                    handoff_plan = content
-                elif event_type == "error":
-                    await _flush_buf()
-                    await self._emit(OutboundMessage(f"Error: {content}"))
-                elif event_type == "cancelled":
-                    await _flush_buf()
-                    await self._emit(OutboundMessage("Cancelled."))
-
-            await _flush_buf()
-
-            # Approval gate: pause before handoff so user can review the plan.
-            if handoff_plan and not self.shutting_down:
-                self._debate_state = {
-                    "phase": "awaiting_approval",
-                    "handoff_plan": handoff_plan,
-                }
-                await self._emit(
-                    OutboundMessage(
-                        "---\n\nPlan ready for execution. "
-                        "Reply 'go' to execute, or send modifications."
-                    )
-                )
-                return  # Session goes idle, user sees the plan
 
     # ------------------------------------------------------------------
     # Tool progress helpers

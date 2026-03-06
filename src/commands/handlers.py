@@ -155,12 +155,12 @@ class CommandHandler:
         """Switch active engine."""
         parts = body.strip().lower().split()
         if len(parts) < 2:
-            self.bot.send_reply("Usage: /agent oc|cc|pi|debate")
+            self.bot.send_reply("Usage: /agent oc|cc|pi")
             return True
 
         engine = normalize_engine(parts[1])
         if not engine:
-            self.bot.send_reply("Usage: /agent oc|cc|pi|debate")
+            self.bot.send_reply("Usage: /agent oc|cc|pi")
             return True
 
         await self.bot.sessions.update_engine(self.bot.session_name, engine)
@@ -216,7 +216,7 @@ class CommandHandler:
         engine = (session.active_engine or "").strip().lower()
         if engine == "claude":
             await self.bot.sessions.reset_claude_session(self.bot.session_name)
-        elif engine in {"pi", "debate"}:
+        elif engine == "pi":
             await self.bot.sessions.reset_pi_session(self.bot.session_name)
         elif engine == "opencode":
             await self.bot.sessions.reset_opencode_session(self.bot.session_name)
@@ -396,9 +396,6 @@ class CommandHandler:
         if self.bot.processing:
             self.bot.send_reply("Already processing. /cancel first, then /retry.")
             return True
-        if self.bot.session.debate_awaiting():
-            self.bot.send_reply("Debate is waiting for your input. Reply directly or /cancel first.")
-            return True
         messages = self.bot.messages.list_recent(self.bot.session_name, limit=20)
         for msg in messages:
             if msg.role == "user" and msg.content.strip():
@@ -416,9 +413,6 @@ class CommandHandler:
         """Summarize session history."""
         if self.bot.processing:
             self.bot.send_reply("Already processing. Try /recap after current work completes.")
-            return True
-        if self.bot.session.debate_awaiting():
-            self.bot.send_reply("Debate is waiting for your input. Reply directly or /cancel first.")
             return True
         messages = self.bot.messages.list_recent(self.bot.session_name, limit=40)
         if not messages:
@@ -500,12 +494,12 @@ class CommandHandler:
         """Hand off to another engine."""
         parts = body.strip().split(maxsplit=2)
         if len(parts) < 2:
-            self.bot.send_reply("Usage: /handoff <engine> [prompt]\nEngines: pi, claude")
+            self.bot.send_reply("Usage: /handoff <engine> [prompt]\nEngines: pi, claude, opencode")
             return True
 
         engine = normalize_engine(parts[1])
-        if not engine or engine == "debate":
-            self.bot.send_reply("Usage: /handoff <engine> [prompt]\nEngines: pi, claude")
+        if not engine:
+            self.bot.send_reply("Usage: /handoff <engine> [prompt]\nEngines: pi, claude, opencode")
             return True
 
         if self.bot.processing:

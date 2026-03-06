@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from src.runners.debate.config import DebateConfig
 from src.runners.opencode.config import OpenCodeConfig
 from src.runners.pi.config import PiConfig
 
@@ -24,7 +23,6 @@ def create_runner(
     output_dir: Path,
     session_name: str | None = None,
     pi_config: PiConfig | None = None,
-    debate_config: DebateConfig | None = None,
     opencode_config: OpenCodeConfig | None = None,
 ) -> Runner:
     engine = (engine or "").strip().lower()
@@ -51,16 +49,6 @@ def create_runner(
             output_dir,
             session_name,
             config=opencode_config,
-        )
-
-    if engine == "debate":
-        from src.runners.debate.runner import DebateRunner
-
-        return DebateRunner(
-            working_dir,
-            output_dir,
-            session_name,
-            config=debate_config,
         )
 
     raise ValueError(f"Unknown engine: {engine}")

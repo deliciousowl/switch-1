@@ -100,12 +100,14 @@ Runs on a dedicated Linux machine (old laptop, mini PC, home server) so the AI h
 | Engine | Runner | How it works |
 |--------|--------|-------------|
 | **claude** | `ClaudeRunner` | Spawns `claude` CLI subprocess per session |
+| **opencode** | `OpenCodeRunner` | Connects to an OpenCode server over HTTP + SSE, streams tool/result events back into the session, and supports model selection plus reasoning mode |
 | **pi** | `PiRunner` | Spawns `pi --mode rpc` subprocess, JSON-RPC over stdin/stdout. Works with any model Pi supports — GPT, Qwen, Kimi, Codex, local models, etc. |
-| **debate** | `DebateRunner` | Two-model collaborative planning via any OpenAI-compatible API. One model asks a clarifying question, user picks approach, both models propose plans in parallel, first synthesizes, second critiques, first finalizes, then hands off to Pi for execution. Auto-falls back to single model if one is unavailable. |
 
-Engines talk to models through standard interfaces — Claude via its CLI, Pi via any provider it supports, Debate via any OpenAI-compatible endpoint (vLLM, llama.cpp, Ollama, LiteLLM, OpenRouter, etc.). Point `DEBATE_MODEL_A_URL` / `DEBATE_MODEL_B_URL` at whatever you're running.
+These are the actual runners currently wired into Switch: `ClaudeRunner`, `OpenCodeRunner`, and `PiRunner`.
 
-Switch between engines mid-session with `/agent cc` or `/agent pi`.
+Engines talk to models through standard interfaces — Claude via its CLI, OpenCode via its server API, and Pi via any provider it supports.
+
+Switch between engines mid-session with `/agent cc`, `/agent oc`, or `/agent pi`.
 
 ## Usage
 
@@ -134,7 +136,7 @@ Switch between engines mid-session with `/agent cc` or `/agent pi`.
 | `/context from:<name> [N]` | Load N messages from another session as context |
 | `/handoff <engine> [prompt]` | One-shot run through another engine |
 | `/compact` | Compact context (Pi only) |
-| `/agent cc\|pi` | Switch engine |
+| `/agent cc\|oc\|pi` | Switch engine |
 | `/ralph <prompt>` | Start autonomous loop |
 | `/ralph-status` | Loop status |
 | `/ralph-cancel` | Stop loop after current iteration |
@@ -144,9 +146,8 @@ Switch between engines mid-session with `/agent cc` or `/agent pi`.
 ## Key Features
 
 - **Multi-session**: each conversation = separate XMPP contact
-- **Multi-engine**: Claude, Pi (any model), Debate — switchable per session
+- **Multi-engine**: Claude, OpenCode, and Pi — switchable per session
 - **Collaborative rooms**: invite participants into shared MUC sessions
-- **Debate approval gate**: debate plans pause for review before execution — reply "go" or send modifications
 - **Cross-session context**: `/context from:<session>` loads history from another session into the current one
 - **Engine handoff**: `/handoff pi <prompt>` for one-shot runs through a different engine
 - **Ralph loops**: autonomous iteration with cost tracking, completion promises, prompt injection
