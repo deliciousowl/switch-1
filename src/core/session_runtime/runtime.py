@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -188,11 +189,17 @@ class SessionRuntime:
         output_tokens = self._as_non_negative_int(stats.get("tokens_out")) or 0
         reasoning_tokens = self._as_non_negative_int(stats.get("tokens_reasoning")) or 0
         input_tokens = self._as_non_negative_int(stats.get("tokens_in")) or 0
-        cache_read_tokens = self._as_non_negative_int(stats.get("tokens_cache_read")) or 0
-        cache_write_tokens = self._as_non_negative_int(stats.get("tokens_cache_write")) or 0
+        cache_read_tokens = (
+            self._as_non_negative_int(stats.get("tokens_cache_read")) or 0
+        )
+        cache_write_tokens = (
+            self._as_non_negative_int(stats.get("tokens_cache_write")) or 0
+        )
 
         total_tokens = stats.get("tokens_total")
-        total_tokens_i = int(total_tokens) if isinstance(total_tokens, (int, float)) else None
+        total_tokens_i = (
+            int(total_tokens) if isinstance(total_tokens, (int, float)) else None
+        )
 
         generated_tokens = output_tokens + reasoning_tokens
 
@@ -354,8 +361,11 @@ class SessionRuntime:
         self._pending_handoff = (target_engine, prompt)
         try:
             await self.enqueue(
-                "", None,
-                trigger_response=True, scheduled=False, wait=True,
+                "",
+                None,
+                trigger_response=True,
+                scheduled=False,
+                wait=True,
             )
         finally:
             self._pending_handoff = None
@@ -588,16 +598,24 @@ class SessionRuntime:
                 return
             # Store the handoff prompt so conversation history isn't orphaned.
             await self._messages.add(
-                self.session_name, "user", handoff_prompt[:500], target_engine,
+                self.session_name,
+                "user",
+                handoff_prompt[:500],
+                target_engine,
             )
             try:
                 self._create_runner_for_engine(target_engine, session)
                 await self._run_engine_generic(
-                    target_engine, session, handoff_prompt,
-                    skip_runner_create=True, ephemeral=True,
+                    target_engine,
+                    session,
+                    handoff_prompt,
+                    skip_runner_create=True,
+                    ephemeral=True,
                 )
             except Exception as e:
-                await self._emit(OutboundMessage(f"Handoff error: {type(e).__name__}: {e}"))
+                await self._emit(
+                    OutboundMessage(f"Handoff error: {type(e).__name__}: {e}")
+                )
             return
 
         session = self._sessions.get(self.session_name)
@@ -688,7 +706,11 @@ class SessionRuntime:
                 )
                 self._ralph_status.loop_id = loop_id
             except Exception:
-                log.warning("Failed to persist Ralph loop for %s", self.session_name, exc_info=True)
+                log.warning(
+                    "Failed to persist Ralph loop for %s",
+                    self.session_name,
+                    exc_info=True,
+                )
 
         promise_str = (
             f'"{cfg.completion_promise}"' if cfg.completion_promise else "none"
@@ -899,9 +921,7 @@ class SessionRuntime:
         prompt_override: str | None = None,
     ) -> "SessionRuntime._RalphIterationResult":
         result = SessionRuntime._RalphIterationResult()
-        engine = (
-            (cfg.force_engine or session.active_engine or "pi").strip().lower()
-        )
+        engine = (cfg.force_engine or session.active_engine or "pi").strip().lower()
         if engine not in {"claude", "pi", "opencode"}:
             log.warning("Ralph: engine %r not supported, falling back to pi", engine)
             engine = "pi"
@@ -932,13 +952,20 @@ class SessionRuntime:
                 elif event_type == "tool" and isinstance(content, str):
                     result.tool_count += 1
                     tool_summaries.append(content)
-                    await self._emit_tool_progress(content, tool_summaries, last_progress_at)
-                    last_progress_at = self._updated_progress_at(tool_summaries, last_progress_at, content)
+                    await self._emit_tool_progress(
+                        content, tool_summaries, last_progress_at
+                    )
+                    last_progress_at = self._updated_progress_at(
+                        tool_summaries, last_progress_at, content
+                    )
                 elif event_type == "tool_result" and isinstance(content, str):
-                    await self._emit(OutboundMessage(
-                        f"... {content}", meta_type="tool-result",
-                        meta_tool=self._infer_meta_tool_from_summary(content),
-                    ))
+                    await self._emit(
+                        OutboundMessage(
+                            f"... {content}",
+                            meta_type="tool-result",
+                            meta_tool=self._infer_meta_tool_from_summary(content),
+                        )
+                    )
                 elif event_type == "result" and isinstance(content, dict):
                     cost = content.get("cost_usd")
                     if isinstance(cost, (int, float)):
@@ -1026,7 +1053,9 @@ class SessionRuntime:
         if engine == "claude":
             await self._sessions.update_claude_session_id(self.session_name, session_id)
         elif engine == "opencode":
-            await self._sessions.update_opencode_session_id(self.session_name, session_id)
+            await self._sessions.update_opencode_session_id(
+                self.session_name, session_id
+            )
         elif engine == "pi":
             await self._sessions.update_pi_session_id(self.session_name, session_id)
 
@@ -1082,13 +1111,20 @@ class SessionRuntime:
                     response_parts = [content]
             elif event_type == "tool" and isinstance(content, str):
                 tool_summaries.append(content)
-                await self._emit_tool_progress(content, tool_summaries, last_progress_at)
-                last_progress_at = self._updated_progress_at(tool_summaries, last_progress_at, content)
+                await self._emit_tool_progress(
+                    content, tool_summaries, last_progress_at
+                )
+                last_progress_at = self._updated_progress_at(
+                    tool_summaries, last_progress_at, content
+                )
             elif event_type == "tool_result" and isinstance(content, str):
-                await self._emit(OutboundMessage(
-                    f"... {content}", meta_type="tool-result",
-                    meta_tool=self._infer_meta_tool_from_summary(content),
-                ))
+                await self._emit(
+                    OutboundMessage(
+                        f"... {content}",
+                        meta_type="tool-result",
+                        meta_tool=self._infer_meta_tool_from_summary(content),
+                    )
+                )
             elif event_type == "result":
                 await self._send_result(
                     tool_summaries, response_parts, content, engine=label
@@ -1100,7 +1136,10 @@ class SessionRuntime:
 
     async def _run_debate(self, session: SessionState, prompt: str) -> None:
         # Phase 3: plan approval — user replied to "Plan ready, reply 'go'"
-        if self._debate_state is not None and self._debate_state.get("phase") == "awaiting_approval":
+        if (
+            self._debate_state is not None
+            and self._debate_state.get("phase") == "awaiting_approval"
+        ):
             handoff_plan = self._debate_state["handoff_plan"]
             self._debate_state = None
 
@@ -1116,15 +1155,21 @@ class SessionRuntime:
             debate_cfg = DebateConfig()
             qwen_model = debate_cfg.resolve_model_a_name()
             await self._emit(
-                OutboundMessage(f"---\n\nHanding off to {qwen_model} for implementation...")
+                OutboundMessage(
+                    f"---\n\nHanding off to {qwen_model} for implementation..."
+                )
             )
             self._create_runner_for_engine(
-                "pi", session,
+                "pi",
+                session,
                 pi_config=PiConfig(model=qwen_model, system_prompt=""),
             )
             await self._run_engine_generic(
-                "pi", session, execute_plan,
-                skip_runner_create=True, result_engine="debate",
+                "pi",
+                session,
+                execute_plan,
+                skip_runner_create=True,
+                result_engine="debate",
             )
             return
 
@@ -1175,9 +1220,7 @@ class SessionRuntime:
             self._debate_state = None  # Clear state before running
 
             enriched_prompt = (
-                original_prompt
-                + "\n\n--- User's approach preference ---\n"
-                + prompt
+                original_prompt + "\n\n--- User's approach preference ---\n" + prompt
             )
 
             self._create_runner_for_engine("debate", session)
@@ -1207,7 +1250,10 @@ class SessionRuntime:
                 elif event_type == "result":
                     await _flush_buf()
                     await self._send_result(
-                        [], [accumulated] if accumulated else [], content, engine="debate"
+                        [],
+                        [accumulated] if accumulated else [],
+                        content,
+                        engine="debate",
                     )
                 elif event_type == "handoff" and isinstance(content, str):
                     handoff_plan = content
@@ -1226,10 +1272,12 @@ class SessionRuntime:
                     "phase": "awaiting_approval",
                     "handoff_plan": handoff_plan,
                 }
-                await self._emit(OutboundMessage(
-                    "---\n\nPlan ready for execution. "
-                    "Reply 'go' to execute, or send modifications."
-                ))
+                await self._emit(
+                    OutboundMessage(
+                        "---\n\nPlan ready for execution. "
+                        "Reply 'go' to execute, or send modifications."
+                    )
+                )
                 return  # Session goes idle, user sees the plan
 
     # ------------------------------------------------------------------
@@ -1239,26 +1287,56 @@ class SessionRuntime:
     async def _emit_tool_progress(
         self, content: str, tool_summaries: list[str], last_progress_at: int
     ) -> None:
+        progress_every = max(
+            1,
+            int(os.getenv("SWITCH_TOOL_PROGRESS_EVERY", "8") or "8"),
+        )
+        verbose_bash = os.getenv(
+            "SWITCH_TOOL_PROGRESS_BASH_VERBOSE", "0"
+        ).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         is_bash = content.startswith("[tool:bash")
-        if is_bash or len(tool_summaries) == 1:
-            await self._emit(OutboundMessage(
-                f"... {content}", meta_type="tool",
-                meta_tool=self._infer_meta_tool_from_summary(content),
-            ))
-        elif len(tool_summaries) - last_progress_at >= 8:
-            await self._emit(OutboundMessage(
-                f"... {' '.join(tool_summaries[-3:])}", meta_type="tool",
-                meta_tool=self._infer_meta_tool_from_summary(tool_summaries[-1]),
-            ))
+        if (is_bash and verbose_bash) or len(tool_summaries) == 1:
+            await self._emit(
+                OutboundMessage(
+                    f"... {content}",
+                    meta_type="tool",
+                    meta_tool=self._infer_meta_tool_from_summary(content),
+                )
+            )
+        elif len(tool_summaries) - last_progress_at >= progress_every:
+            await self._emit(
+                OutboundMessage(
+                    f"... {' '.join(tool_summaries[-3:])}",
+                    meta_type="tool",
+                    meta_tool=self._infer_meta_tool_from_summary(tool_summaries[-1]),
+                )
+            )
 
     @staticmethod
     def _updated_progress_at(
         tool_summaries: list[str], last_progress_at: int, content: str
     ) -> int:
+        progress_every = max(
+            1,
+            int(os.getenv("SWITCH_TOOL_PROGRESS_EVERY", "8") or "8"),
+        )
+        verbose_bash = os.getenv(
+            "SWITCH_TOOL_PROGRESS_BASH_VERBOSE", "0"
+        ).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
         is_bash = content.startswith("[tool:bash")
-        if is_bash or len(tool_summaries) == 1:
+        if (is_bash and verbose_bash) or len(tool_summaries) == 1:
             return len(tool_summaries)
-        if len(tool_summaries) - last_progress_at >= 8:
+        if len(tool_summaries) - last_progress_at >= progress_every:
             return len(tool_summaries)
         return last_progress_at
 

@@ -58,8 +58,8 @@ def _legacy_dispatchers(domain: str) -> dict[str, dict]:
             "password": os.getenv("OC_GPT_PASSWORD", ""),
             "engine": "pi",
             "agent": "bridge-gpt",
-            "model_id": os.getenv("OC_GPT_MODEL_ID", "openai/gpt-5.2"),
-            "label": "GPT 5.2",
+            "model_id": os.getenv("OC_GPT_MODEL_ID", "openai/gpt-5.4"),
+            "label": "GPT 5.4",
         },
         "oc": {
             "jid": os.getenv("OC_JID", f"oc@{domain}"),
@@ -168,6 +168,10 @@ def _load_dispatchers_config(domain: str) -> dict[str, dict]:
 
     raw_json = (os.getenv("SWITCH_DISPATCHERS_JSON", "") or "").strip()
     raw_file = (os.getenv("SWITCH_DISPATCHERS_FILE", "") or "").strip()
+    default_files = [
+        Path.cwd() / "dispatchers.local.json",
+        Path.cwd() / "dispatchers.json",
+    ]
 
     payload: object | None = None
     if raw_json:
@@ -184,6 +188,16 @@ def _load_dispatchers_config(domain: str) -> dict[str, dict]:
             _log.warning(
                 "Invalid SWITCH_DISPATCHERS_FILE; using legacy dispatchers: %s", e
             )
+    else:
+        for path in default_files:
+            if not path.exists():
+                continue
+            try:
+                payload = json.loads(path.read_text())
+                _log.info("Loaded dispatchers from %s", path)
+                break
+            except Exception as e:
+                _log.warning("Invalid dispatcher config %s: %s", path, e)
 
     if payload is None:
         return _legacy_dispatchers(domain)

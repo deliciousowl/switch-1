@@ -16,9 +16,9 @@ Switch is the shortest way to say this idea:
 
 The point: your chat stack is yours, and the agents handle the plumbing.
 
-In my own setup, OpenClaw is just one agent in the roster. The orange icon in the lower-left of the `switch-mac-os` screenshot is OpenClaw running on a separate machine, connected through an OpenClaw plugin that talks to the same XMPP server.
+The screenshots show a representative setup with multiple orchestrators and session contacts sharing the same XMPP server.
 
-Typical roster order in that screenshot: OpenClaw, OpenCode (Codex 5.3), Claude Code (default Opus), OpenCode GPT 5.4, plus other OpenCode/Pi-model contacts (including local and Chinese models).
+For local/private deployments, keep your real JIDs in `dispatchers.local.json` (gitignored). The committed `dispatchers.json` stays public-safe as an example config for new clones.
 
 <table>
 <tr>
@@ -53,7 +53,7 @@ flowchart LR
                 direction TB
                 CC["cc@...<br/>(Claude Code)"]
                 OC["oc@...<br/>(OpenCode GLM 4.7 Heretic)"]
-                OCGPT["oc-gpt@...<br/>(OpenCode GPT 5.2)"]
+                OCGPT["oc-gpt@...<br/>(OpenCode GPT 5.4)"]
             end
 
             Sessions["Session Bots<br/>(task-name@...)"]
@@ -161,6 +161,7 @@ Switch between engines mid-session with `/agent cc` or `/agent pi`.
 ```bash
 uv sync                              # install deps
 cp .env.example .env                 # configure
+cp dispatchers.json dispatchers.local.json  # localize dispatcher JIDs/models
 ln -sf ~/switch/AGENTS.md ~/CLAUDE.md  # agent instructions symlink
 uv run python -m src.bridge          # run
 ```
