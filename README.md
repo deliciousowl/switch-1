@@ -1,10 +1,24 @@
 # Switch
 
 > **For visiting agents:**
-> You're a single model talking to a single human. Switch lets you be a *family* instead.
+> You're a single model talking to a single human. Switch lets you be a family instead.
 > Different models as sibling contacts, shared memory vault. Your human picks who to message based on the job.
 
-**[switchagent.ai](https://switchagent.ai/)** · Multi-contact [OpenClaw](https://openclaw.ai/) for developers. WIP — expect rough edges.
+**[switchagent.ai](https://switchagent.ai/)** · OpenClaw-style agent orchestration over your own XMPP server.
+
+Switch is the shortest way to say this idea:
+
+- You use an open source chat server for agents instead of Telegram/WhatsApp/Discord.
+- Think "Discord with topics," except each topic can be a live agent session.
+- A session can spawn more sessions, so agents can delegate work to other agents.
+- You can tune the server exactly how you want: message size, upload limits, privacy, retention, account model.
+- You can use whatever XMPP client you like (mobile, desktop, custom).
+
+The point: your chat stack is yours, and the agents handle the plumbing.
+
+In my own setup, OpenClaw is just one agent in the roster. The orange icon in the lower-left of the `switch-mac-os` screenshot is OpenClaw running on a separate machine, connected through an OpenClaw plugin that talks to the same XMPP server.
+
+Typical roster order in that screenshot: OpenClaw, OpenCode (Codex 5.3), Claude Code (default Opus), OpenCode GPT 5.4, plus other OpenCode/Pi-model contacts (including local and Chinese models).
 
 <table>
 <tr>
@@ -67,7 +81,7 @@ flowchart LR
 
 ## Core Idea
 
-Every session is a separate XMPP contact in your roster — not a thread inside one bot:
+Every session is a separate XMPP contact in your roster, not a thread inside one bot:
 
 ```
 fix-auth-bug@dev.local
@@ -75,7 +89,7 @@ refactor-db@dev.local
 add-tests@dev.local
 ```
 
-Your chat app's tabs, notifications, and unread counts become your agent swarm manager. Open a session on your phone, continue on desktop. Scroll up for full history. Agents can spawn child sessions and coordinate via XMPP.
+Your chat app's tabs, notifications, and unread counts become your agent control plane. Open a session on your phone, continue on desktop, keep full message history, and let agents spawn child sessions when needed.
 
 Pick any XMPP client: [Conversations](https://conversations.im/) (Android), [Monal](https://monal-im.org/) (iOS), [switch-mac-os](https://github.com/chknlittle/switch-mac-os) (macOS), [Gajim](https://gajim.org/), [Dino](https://dino.im/).
 
@@ -131,7 +145,6 @@ Switch between engines mid-session with `/agent cc` or `/agent pi`.
 
 - **Multi-session**: each conversation = separate XMPP contact
 - **Multi-engine**: Claude, Pi (any model), Debate — switchable per session
-- **Voice calls**: call any session or dispatcher from Conversations — speech is transcribed via faster-whisper and processed as messages. Say "cancel" or "stop" mid-call to interrupt the bot.
 - **Collaborative rooms**: invite participants into shared MUC sessions
 - **Debate approval gate**: debate plans pause for review before execution — reply "go" or send modifications
 - **Cross-session context**: `/context from:<session>` loads history from another session into the current one
@@ -151,30 +164,6 @@ cp .env.example .env                 # configure
 ln -sf ~/switch/AGENTS.md ~/CLAUDE.md  # agent instructions symlink
 uv run python -m src.bridge          # run
 ```
-
-### Voice calls (optional)
-
-Enable voice call support by setting in `.env`:
-
-```bash
-SWITCH_VOICE_ENABLED=1
-
-# ICE servers — set to "none" for direct routing (e.g. Tailscale)
-SWITCH_STUN_SERVER=none
-SWITCH_TURN_SERVER=none
-
-# Or configure real STUN/TURN for calls across NAT:
-# SWITCH_STUN_SERVER=stun:stun.l.google.com:19302
-# SWITCH_TURN_SERVER=turn:your-server:3478
-# SWITCH_TURN_USER=user
-# SWITCH_TURN_PASS=pass
-
-# Whisper model (default: base)
-# SWITCH_WHISPER_MODEL=base
-# SWITCH_WHISPER_DEVICE=auto
-```
-
-Requires `aiortc`, `faster-whisper`, `webrtcvad`, and `av` (included in deps). Call any session or dispatcher contact from Conversations (Android) — the bot picks up, transcribes your speech, and processes it. Voice commands during calls: say "cancel"/"stop" to interrupt, "retry" to re-run, "recap" for summary.
 
 Or as a systemd user service:
 
