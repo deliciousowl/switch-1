@@ -54,7 +54,9 @@ class OpenCodeTransport:
                 if "connector is closed" in msg or "server disconnected" in msg:
                     log.debug(f"OpenCode abort task ended during shutdown: {e}")
                 else:
-                    log.warning(f"OpenCode abort task failed during wait_cancelled: {e}")
+                    log.warning(
+                        f"OpenCode abort task failed during wait_cancelled: {e}"
+                    )
 
     async def start_session(
         self,
@@ -209,7 +211,9 @@ class OpenCodeTransport:
             except Exception as e:
                 msg = str(e).lower()
                 if "connector is closed" in msg or "server disconnected" in msg:
-                    log.debug(f"OpenCode abort during cleanup ended after disconnect: {e}")
+                    log.debug(
+                        f"OpenCode abort during cleanup ended after disconnect: {e}"
+                    )
                 else:
                     log.warning(f"OpenCode abort failed during cleanup: {e}")
 
