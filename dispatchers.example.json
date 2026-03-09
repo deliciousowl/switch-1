@@ -1,7 +1,7 @@
 [
   {
     "name": "acorn",
-    "jid": "acorn@localhost",
+    "jid": "acorn@your.xmpp.server",
     "password_env": "ACORN_PASSWORD",
     "engine": "external",
     "agent": null,
@@ -10,7 +10,7 @@
   },
   {
     "name": "oc-codex",
-    "jid": "oc-codex@localhost",
+    "jid": "oc-codex@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-gpt",
@@ -19,7 +19,7 @@
   },
   {
     "name": "cc",
-    "jid": "cc@localhost",
+    "jid": "cc@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "claude",
     "agent": null,
@@ -27,7 +27,7 @@
   },
   {
     "name": "oc-gpt",
-    "jid": "oc-gpt@localhost",
+    "jid": "oc-gpt@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-gpt",
@@ -36,7 +36,7 @@
   },
   {
     "name": "qwen",
-    "jid": "qwen@localhost",
+    "jid": "qwen@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-qwen",
@@ -45,7 +45,7 @@
   },
   {
     "name": "qwen-spark",
-    "jid": "qwen-spark@localhost",
+    "jid": "qwen-spark@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-qwen-spark",
@@ -54,7 +54,7 @@
   },
   {
     "name": "oc-glm-zen",
-    "jid": "oc-glm-zen@localhost",
+    "jid": "oc-glm-zen@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-zen",
@@ -63,7 +63,7 @@
   },
   {
     "name": "oc-gpt-or",
-    "jid": "oc-gpt-or@localhost",
+    "jid": "oc-gpt-or@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-gpt-or",
@@ -72,7 +72,7 @@
   },
   {
     "name": "oc-gemini",
-    "jid": "oc-gemini@localhost",
+    "jid": "oc-gemini@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-gemini",
@@ -81,7 +81,7 @@
   },
   {
     "name": "oc-kimi-coding",
-    "jid": "oc-kimi-coding@localhost",
+    "jid": "oc-kimi-coding@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-kimi-coding",
@@ -90,7 +90,7 @@
   },
   {
     "name": "heretic",
-    "jid": "heretic@localhost",
+    "jid": "heretic@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-heretic",
@@ -99,7 +99,7 @@
   },
   {
     "name": "epstein",
-    "jid": "epstein@localhost",
+    "jid": "epstein@your.xmpp.server",
     "password_env": "XMPP_PASSWORD",
     "engine": "opencode",
     "agent": "bridge-epstein",
