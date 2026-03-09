@@ -196,7 +196,6 @@ class SessionBot(BaseXMPPBot):
         async def update_opencode_session_id(self, name: str, session_id: str) -> None:
             await self._repo.update_opencode_session_id(name, session_id)
 
-
     class _MessagesAdapter(MessageStorePort):
         def __init__(self, repo: MessageRepository):
             self._repo = repo
