@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import signal
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -39,6 +41,7 @@ class PiRunner(BaseRunner):
             log_response=self._log_response,
         )
         self._process: asyncio.subprocess.Process | None = None
+        self._pgid: int | None = None
         self._cancelled = False
         self._stderr_task: asyncio.Task | None = None
 
@@ -67,8 +70,11 @@ class PiRunner(BaseRunner):
             "ALWAYS use virtual environments for ALL projects — "
             "python venvs for Python, local node_modules (never npm install -g) for Node. "
             "NEVER install packages globally. "
-            "Bash commands timeout after 30s — for long-running processes "
-            "(servers, builds, etc.) use nohup or launch in a tmux session. "
+            "The bash tool has a `timeout` parameter (seconds) — ALWAYS set it. "
+            "Use 30 for quick commands, 120 for installs/builds, 300 for slow network ops. "
+            "A command without a timeout will block the entire session indefinitely. "
+            "For processes that must run longer (servers, watchers, etc.) "
+            "launch them in a tmux session or with nohup instead of running them directly. "
             "NEVER run a server in the foreground — it will block and hang. "
             "Stay focused on the task — do not explore the filesystem or read unrelated files."
         )
@@ -228,7 +234,41 @@ class PiRunner(BaseRunner):
             except asyncio.TimeoutError:
                 if self._is_alive():
                     elapsed = int(asyncio.get_event_loop().time() - _started_at)
-                    log.warning("Pi produced no output for %ds — still waiting", elapsed)
+                    # Check whether Pi has child processes — if so it's most
+                    # likely waiting for a bash tool to return (the common hang
+                    # cause).  Helps distinguish "thinking" from "stuck on bash".
+                    child_pids: list[int] = []
+                    if self._pgid is not None:
+                        try:
+                            for p in Path("/proc").iterdir():
+                                if not p.name.isdigit():
+                                    continue
+                                pid = int(p.name)
+                                if pid == self._process.pid:  # type: ignore[union-attr]
+                                    continue
+                                try:
+                                    stat = (p / "stat").read_text()
+                                    # Skip past comm field (may contain spaces/parens)
+                                    after_comm = stat[stat.rfind(")") + 2:]
+                                    fields = after_comm.split()
+                                    # fields: state ppid pgrp ...
+                                    if int(fields[2]) == self._pgid:
+                                        child_pids.append(pid)
+                                except Exception:
+                                    continue
+                        except Exception:
+                            pass
+                    if child_pids:
+                        log.warning(
+                            "Pi produced no output for %ds — waiting for bash subprocess(es) %s",
+                            elapsed,
+                            child_pids,
+                        )
+                    else:
+                        log.warning(
+                            "Pi produced no output for %ds — still waiting (no bash children)",
+                            elapsed,
+                        )
                     continue
                 else:
                     log.warning("Pi process exited while waiting for output")
@@ -289,7 +329,13 @@ class PiRunner(BaseRunner):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.working_dir,
                 limit=10 * 1024 * 1024,
+                start_new_session=True,
             )
+            # Save pgid immediately — once the process exits os.getpgid() raises.
+            try:
+                self._pgid = os.getpgid(self._process.pid)
+            except OSError:
+                self._pgid = None
 
             # Drain stderr in background to prevent pipe buffer deadlock.
             self._stderr_task = asyncio.create_task(self._drain_stderr())
@@ -379,30 +425,61 @@ class PiRunner(BaseRunner):
         self._stderr_task = None
 
         proc = self._process
+        pgid = self._pgid
         self._process = None
+        self._pgid = None
         if not proc:
             return
 
-        # Close stdin first to signal graceful shutdown.
+        # Flush the abort message written in cancel() so Pi actually receives it
+        # and can call killProcessTree() on its bash subprocesses before we
+        # send SIGTERM.  Without this drain the bytes may still be sitting in
+        # Python's asyncio StreamWriter buffer when the pipe is closed.
         if proc.stdin and not proc.stdin.is_closing():
+            try:
+                await asyncio.wait_for(proc.stdin.drain(), timeout=1.0)
+            except Exception:
+                pass
             try:
                 proc.stdin.close()
             except Exception:
                 pass
+            # Give Pi's Node.js event loop a moment to receive the abort line,
+            # fire killProcessTree(), and reap its bash subprocesses before we
+            # send SIGTERM and Pi itself dies.  Only needed when cancel() was
+            # called — normal completions have nothing to drain.
+            if self._cancelled:
+                await asyncio.sleep(0.3)
 
-        try:
-            proc.terminate()
-        except ProcessLookupError:
-            return  # Already dead.
+        # Kill Pi's entire process group (Pi + any non-detached children).
+        # Pi's bash tool children use detached:true so they're in their own
+        # groups and are expected to have been killed by Pi's killProcessTree
+        # above; this handles any other stragglers in Pi's group.
+        if pgid is not None:
+            try:
+                os.killpg(pgid, signal.SIGTERM)
+            except (ProcessLookupError, OSError):
+                return  # Already dead.
+        else:
+            try:
+                proc.terminate()
+            except ProcessLookupError:
+                return  # Already dead.
 
         try:
             await asyncio.wait_for(proc.wait(), timeout=5.0)
         except (asyncio.TimeoutError, ProcessLookupError):
             log.warning("Pi process did not exit after SIGTERM, escalating to SIGKILL")
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                return
+            if pgid is not None:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    return
+            else:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    return
             # Verify it's actually dead.
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
